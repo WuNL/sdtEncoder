@@ -1,0 +1,3 @@
+#cmakedefine USE_INTEL
+#cmakedefine SAVE_RAW
+#cmakedefine SAVE_CODECED
