@@ -19,7 +19,7 @@ public:
     virtual int forceKeyFrame (bool insertKeyFrame) override;
 
 private:
-    int encodeBuffer (void *in, void *out) override {}
+    int encodeBuffer (void *in) override {}
 
     static void *start (void *threadarg);
 

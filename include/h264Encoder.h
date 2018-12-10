@@ -28,7 +28,7 @@ public:
 
 private:
 public:
-    virtual int encodeBuffer (void *in, void *out) override;
+    virtual int encodeBuffer (void *in) override;
 
 private:
 
@@ -37,7 +37,7 @@ private:
     void encodeBuffer ();
 
 private:
-    mfxBitstream mfxBS;
+
 
     mfxStatus sts;
     mfxIMPL impl;

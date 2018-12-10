@@ -70,6 +70,8 @@ typedef struct ForceKeyFrameParams
 class encoder : public boost::noncopyable
 {
 public:
+    mfxBitstream mfxBS;
+
     typedef std::function<void ()> ErrHandleCallback;
     typedef std::function<void ()> NotifyCloseCallback;
 
@@ -144,7 +146,7 @@ public:
     /// \param in
     /// \param out
     /// \return
-    virtual int encodeBuffer (void *in, void *out) = 0;
+    virtual int encodeBuffer (void *in) = 0;
 
 private:
 

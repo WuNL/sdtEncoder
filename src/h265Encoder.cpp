@@ -165,18 +165,18 @@ int h265Encoder::initEncoder ()
     VPPParams.vpp.In.ChromaFormat = MFX_CHROMAFORMAT_YUV420;
     VPPParams.vpp.In.CropX = 0;
     VPPParams.vpp.In.CropY = 0;
-    VPPParams.vpp.In.CropW = static_cast<mfxU16>(params.v_width);
-    VPPParams.vpp.In.CropH = static_cast<mfxU16>(params.v_height);
+    VPPParams.vpp.In.CropW = static_cast<mfxU16>(1920);
+    VPPParams.vpp.In.CropH = static_cast<mfxU16>(1080);
     VPPParams.vpp.In.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
     VPPParams.vpp.In.FrameRateExtN = static_cast<mfxU16>(params.framerate);
     VPPParams.vpp.In.FrameRateExtD = 1;
     // width must be a multiple of 16
     // height must be a multiple of 16 in case of frame picture and a multiple of 32 in case of field picture
-    VPPParams.vpp.In.Width = static_cast<mfxU16>(params.v_width);
+    VPPParams.vpp.In.Width = static_cast<mfxU16>(1920);
     VPPParams.vpp.In.Height =
             static_cast<mfxU16>((MFX_PICSTRUCT_PROGRESSIVE == VPPParams.vpp.In.PicStruct) ?
-                                MSDK_ALIGN16(params.v_height) :
-                                MSDK_ALIGN32(params.v_height));
+                                MSDK_ALIGN16(1080) :
+                                MSDK_ALIGN32(1080));
     // Output data
     VPPParams.vpp.Out.FourCC = MFX_FOURCC_NV12;
     VPPParams.vpp.Out.ChromaFormat = MFX_CHROMAFORMAT_YUV420;
@@ -226,8 +226,8 @@ int h265Encoder::initEncoder ()
     //4. Allocate surfaces for VPP: In
     // - Width and height of buffer must be aligned, a multiple of 32
     // - Frame surface array keeps pointers all surface planes and general frame info
-    width = (mfxU16) MSDK_ALIGN32(params.v_width);
-    height = (mfxU16) MSDK_ALIGN32(params.v_height);
+    width = (mfxU16) MSDK_ALIGN32(MAX_WIDTH);
+    height = (mfxU16) MSDK_ALIGN32(MAX_HEIGHT);
     mfxU8 bitsPerPixel = 12;        // NV12 format is a 12 bits per pixel format
     auto surfaceSize = static_cast<mfxU32>(width * height * bitsPerPixel / 8);
     auto *surfaceBuffersIn = (mfxU8 *) new mfxU8[surfaceSize * nSurfNumVPPIn];
@@ -379,5 +379,106 @@ int h265Encoder::updateBitrate (int target_kbps, int target_fps)
 int h265Encoder::forceKeyFrame (bool insertKeyFrame)
 {
     insertIDR = true;
+    return 0;
+}
+
+int h265Encoder::encodeBuffer (void *buffer)
+{
+    if (! buffer)
+        return MFX_ERR_NULL_PTR;
+    int nSurfIdxIn = 0, nSurfIdxOut = 0;
+    static mfxU32 nFrame = 0;
+    mfxSyncPoint syncp;
+//    nEncSurfIdx = GetFreeSurfaceIndex(pEncSurfaces, nEncSurfNum);   // Find free frame surface
+//    MSDK_CHECK_ERROR(MFX_ERR_NOT_FOUND, nEncSurfIdx, MFX_ERR_MEMORY_ALLOC);
+//
+//    sts = LoadRawFrameFromV4l2(pEncSurfaces[nEncSurfIdx], buffer);
+//
+//    MSDK_RETURN_ON_ERROR(sts);
+
+
+
+    nSurfIdxIn = GetFreeSurfaceIndex(pVPPSurfacesIn, nSurfNumVPPIn);        // Find free input frame surface
+    pVPPSurfacesIn[nSurfIdxIn]->Data.TimeStamp = nFrame * 90000 / VPPParams.vpp.Out.FrameRateExtN;
+
+    sts = LoadRawFrameFromV4l2(pVPPSurfacesIn[nSurfIdxIn], (uint8_t *) buffer);
+    MSDK_RETURN_ON_ERROR(sts);
+
+    nSurfIdxOut = GetFreeSurfaceIndex(pVPPSurfacesOut, nSurfNumVPPOutEnc);     // Find free output frame surface
+    MSDK_CHECK_ERROR(MFX_ERR_NOT_FOUND, nSurfIdxOut, MFX_ERR_MEMORY_ALLOC);
+
+    for (;;)
+    {
+        // Process a frame asychronously (returns immediately)
+        sts = mfxVPP->RunFrameVPPAsync(pVPPSurfacesIn[nSurfIdxIn], pVPPSurfacesOut[nSurfIdxOut], NULL, &syncp);
+
+        //skip a frame
+
+        if (MFX_ERR_MORE_DATA == sts)
+        {
+            nSurfIdxIn = GetFreeSurfaceIndex(pVPPSurfacesIn, nSurfNumVPPIn);
+            MSDK_CHECK_ERROR(MFX_ERR_NOT_FOUND, nSurfIdxIn, MFX_ERR_MEMORY_ALLOC);
+            pVPPSurfacesIn[nSurfIdxIn]->Data.TimeStamp = nFrame * 90000 / VPPParams.vpp.Out.FrameRateExtN;
+            return sts;
+        }
+
+        //add (often duplicate) a frame
+        if (MFX_ERR_MORE_SURFACE == sts)
+        {
+            //todo
+        }
+
+
+        if (MFX_WRN_DEVICE_BUSY == sts)
+        {
+            MSDK_SLEEP(1);  // Wait if device is busy, then repeat the same call
+        } else
+            break;
+
+    }
+
+    for (;;)
+    {
+        // Encode a frame asychronously (returns immediately)
+        if (insertIDR)
+        {
+            mfxEncodeCtrl ctrl;
+            memset(&ctrl, 0, sizeof(ctrl));
+            if (mfxEncParams.mfx.CodecId == MFX_CODEC_AVC)
+                ctrl.FrameType = (MFX_FRAMETYPE_I | MFX_FRAMETYPE_IDR | MFX_FRAMETYPE_REF);
+            else if (mfxEncParams.mfx.CodecId == MFX_CODEC_HEVC)
+                ctrl.FrameType = (MFX_FRAMETYPE_I | MFX_FRAMETYPE_IDR | MFX_FRAMETYPE_REF);
+            sts = mfxENC->EncodeFrameAsync(&ctrl, pVPPSurfacesOut[nSurfIdxOut], &mfxBS, &syncp);
+            printf("IDR frame insert success\n");
+            insertIDR = false;
+        } else
+        {
+            sts = mfxENC->EncodeFrameAsync(NULL, pVPPSurfacesOut[nSurfIdxOut], &mfxBS, &syncp);
+        }
+
+        //printf("********************\n");
+        if (MFX_ERR_NONE < sts && ! syncp)       // Repeat the call if warning and no output
+        {
+            if (MFX_WRN_DEVICE_BUSY == sts) MSDK_SLEEP(1);  // Wait if device is busy, then repeat the same call
+        } else if (MFX_ERR_NONE < sts && syncp)
+        {
+            sts = MFX_ERR_NONE;     // Ignore warnings if output is available
+            break;
+        } else if (MFX_ERR_NOT_ENOUGH_BUFFER == sts)
+        {
+            // Allocate more bitstream buffer memory here if needed...
+            break;
+        } else
+            break;
+    }
+
+
+    if (MFX_ERR_NONE == sts)
+    {
+        sts = session.SyncOperation(syncp, 60000);      // Synchronize. Wait until encoded frame is ready
+        MSDK_CHECK_RESULT(sts, MFX_ERR_NONE, sts);
+
+        ++ nFrame;
+    }
     return 0;
 }

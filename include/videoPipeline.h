@@ -6,7 +6,9 @@
 #include <errno.h>
 #include <stdlib.h>
 #include "capture.h"
-#include "encoder.h"
+#include "h264Encoder.h"
+#include "h265Encoder.h"
+#include "fakeEncoder.h"
 #include "packet.h"
 #include "network.h"
 
@@ -15,10 +17,9 @@ using namespace std;
 class videoPipeline
 {
 public:
-    videoPipeline (initParams &p);
+    explicit videoPipeline (initParams &p);
 
     virtual ~videoPipeline ();
-
 
     bool GetisRun ()
     {
@@ -30,26 +31,20 @@ public:
         isRun = val;
     }
 
-    void update (string msg)
+    void insertIdr ()
     {
-        printf("videoPipeline update:%s\n", msg.c_str());
-        if (msg == string("stop"))
-        {
-            isRun = false;
-        } else if (isReleased == true && msg == string("start"))
-        {
-            isRun = true;
-            start();
-        }
+        if (videoEncoder)
+            videoEncoder->forceKeyFrame(true);
+    }
+
+    void update (const string &msg)
+    {
+
     }
 
     void updateOptions (CmdOptions options)
     {
-        opt = options;
-        isRun = false;
-        join();
-        isRun = true;
-        start();
+
     }
 
     void start ();
@@ -60,10 +55,7 @@ public:
     //对这个线程发出停止信号，线程在时机合适时停止运行
     void cancel ();
 
-
     //负责创建各个模块的实例
-    void init (CmdOptions &options);
-
     void init ();
 
 private:
@@ -72,7 +64,7 @@ private:
 
     static void release (void *threadarg)
     {
-        videoPipeline *ptr = (videoPipeline *) threadarg;
+        auto *ptr = (videoPipeline *) threadarg;
         ptr->realRelease();
     }
 
@@ -84,13 +76,17 @@ private:
 protected:
 
 private:
-    CmdOptions opt;
+    std::string encoder_name;
+public:
+    const string &getEncoder_name () const;
+
+private:
     initParams params;
 
     bool isRun, isReleased;
 
     capture *captureDevice;
-    videoPipeline *pri_videopipeline;
+    encoder *videoEncoder;
     packet *pkt;
     struct net_handle *nethandle;
 

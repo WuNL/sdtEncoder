@@ -186,7 +186,8 @@ handle_request (
         std::cout << "InitEncoder body content:" << req.body() << std::endl;
         initParams p;
         if (jsonParser(req.body(), p))
-            return send(bad_request("Illegal Init Param"));
+            return send(bad_request(
+                    R"(Illegal Init Param,example:"127.0.0.1:12345/InitEncoder/", with content " {"encoder_name":"test","codec":"h264","v_width":1920,"v_height":1080,"v_gop":300,"packetMode":0,"framerate":30,"bitrate":3000,"dstIP":"127.0.0.1","port":10086,"payload_len":1400,"deviceID":0} " )"));
 
         initParamsRet ret = g_conductor.initEncoder(p);
         std::cout << "after init, the vector size is :" << g_conductor.getSize() << std::endl;
@@ -277,6 +278,8 @@ handle_request (
         std::cout << "DestroyEncoder body content:" << req.body() << std::endl;
         destroyParams p;
         jsonParserDestroy(req.body(), p);
+        g_conductor.destroyEncoder(p);
+        return send(server_error("server error"));
         if (p.success)
         {
             //destroy success
